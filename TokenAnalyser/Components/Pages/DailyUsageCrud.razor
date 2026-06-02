@@ -1,0 +1,225 @@
+@page "/daily-usage"
+@rendermode InteractiveServer
+@inject DailyUsageService UsageService
+
+<PageTitle>Daily Usage – CRUD</PageTitle>
+
+<h1 class="mb-3">📋 Daily Usage</h1>
+
+<!-- Month/Year filter -->
+<div class="d-flex align-items-center gap-3 mb-4">
+    <label class="fw-semibold mb-0">Filter by Month:</label>
+    <select class="form-select w-auto" @bind="FilterMonth" @bind:after="LoadEntries">
+        @for (int m = 1; m <= 12; m++)
+        {
+            <option value="@m">@(new DateTime(FilterYear, m, 1).ToString("MMMM"))</option>
+        }
+    </select>
+    <select class="form-select w-auto" @bind="FilterYear" @bind:after="LoadEntries">
+        @for (int y = DateTime.Today.Year - 2; y <= DateTime.Today.Year + 1; y++)
+        {
+            <option value="@y">@y</option>
+        }
+    </select>
+    <button class="btn btn-primary ms-auto" @onclick="OpenAddDialog">
+        ➕ Add Entry
+    </button>
+</div>
+
+<!-- Table -->
+@if (_entries.Count == 0)
+{
+    <div class="alert alert-info">No entries found for the selected month.</div>
+}
+else
+{
+    <table class="table table-striped table-hover align-middle">
+        <thead class="table-dark">
+            <tr>
+                <th>Date</th>
+                <th>Model</th>
+                <th class="text-end">Usage (tokens)</th>
+                <th class="text-center" style="width:175px">Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var entry in _entries)
+            {
+                <tr>
+                    <td>@entry.Date.ToString("dd/MM/yyyy")</td>
+                    <td>@entry.Model</td>
+                    <td class="text-end">@entry.Usage.ToString("N2")</td>
+                    <td class="text-center">
+                        <button class="btn btn-sm btn-outline-primary me-1" @onclick="() => OpenEditDialog(entry)">✏️ Edit</button>
+                        <button class="btn btn-sm btn-outline-danger" @onclick="() => ConfirmDelete(entry)">🗑️ Delete</button>
+                    </td>
+                </tr>
+            }
+        </tbody>
+        <tfoot>
+            <tr class="table-secondary fw-bold">
+                <td>Total</td>
+                <td></td>
+                <td class="text-end">@_entries.Sum(e => e.Usage).ToString("N2")</td>
+                <td></td>
+            </tr>
+        </tfoot>
+    </table>
+}
+
+<!-- Add/Edit Modal -->
+@if (_showForm)
+{
+    <div class="modal d-block" tabindex="-1" style="background:rgba(0,0,0,.4)">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">@(_isEditing ? "Edit" : "Add") Daily Usage</h5>
+                    <button type="button" class="btn-close" @onclick="CloseForm"></button>
+                </div>
+                <EditForm Model="_formModel" OnValidSubmit="SaveEntry">
+                    <DataAnnotationsValidator />
+                    <div class="modal-body">
+                        <div class="mb-3">
+                            <label class="form-label">Date</label>
+                            <InputDate class="form-control" @bind-Value="_formModel.Date" />
+                            <ValidationMessage For="() => _formModel.Date" />
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Model</label>
+                            <InputText class="form-control" @bind-Value="_formModel.Model" placeholder="e.g. gpt-4o" />
+                            <ValidationMessage For="() => _formModel.Model" />
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Usage (tokens)</label>
+                            <InputNumber class="form-control" @bind-Value="_formModel.Usage" />
+                            <ValidationMessage For="() => _formModel.Usage" />
+                        </div>
+                        @if (_formError is not null)
+                        {
+                            <div class="alert alert-danger py-1">@_formError</div>
+                        }
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" @onclick="CloseForm">Cancel</button>
+                        <button type="submit" class="btn btn-primary">Save</button>
+                    </div>
+                </EditForm>
+            </div>
+        </div>
+    </div>
+}
+
+<!-- Delete Confirm Modal -->
+@if (_entryToDelete is not null)
+{
+    <div class="modal d-block" tabindex="-1" style="background:rgba(0,0,0,.4)">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title text-danger">Confirm Deletion</h5>
+                    <button type="button" class="btn-close" @onclick="() => _entryToDelete = null"></button>
+                </div>
+                <div class="modal-body">
+                    Are you sure you want to delete the entry for <strong>@_entryToDelete.Date.ToString("dd/MM/yyyy")</strong>
+                    (@_entryToDelete.Model – usage: @_entryToDelete.Usage.ToString("N2"))?
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-secondary" @onclick="() => _entryToDelete = null">Cancel</button>
+                    <button class="btn btn-danger" @onclick="DeleteEntry">Delete</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private int FilterYear { get; set; } = DateTime.Today.Year;
+    private int FilterMonth { get; set; } = DateTime.Today.Month;
+
+    private List<DailyUsage> _entries = [];
+    private bool _showForm;
+    private bool _isEditing;
+    private FormModel _formModel = new();
+    private string? _formError;
+    private DailyUsage? _entryToDelete;
+
+    protected override void OnInitialized() => LoadEntries();
+
+    private void LoadEntries()
+    {
+        _entries = UsageService.GetByMonth(FilterYear, FilterMonth);
+    }
+
+    private void OpenAddDialog()
+    {
+        _formModel = new FormModel { Date = new DateOnly(FilterYear, FilterMonth, 1) };
+        _isEditing = false;
+        _formError = null;
+        _showForm = true;
+    }
+
+    private void OpenEditDialog(DailyUsage entry)
+    {
+        _formModel = new FormModel { Id = entry.Id, Date = entry.Date, Model = entry.Model, Usage = entry.Usage };
+        _isEditing = true;
+        _formError = null;
+        _showForm = true;
+    }
+
+    private void CloseForm() => _showForm = false;
+
+    private void SaveEntry()
+    {
+        _formError = null;
+
+        if (_formModel.Usage <= 0)
+        {
+            _formError = "Usage must be greater than 0.";
+            return;
+        }
+
+        if (_isEditing)
+        {
+            UsageService.Update(new DailyUsage
+            {
+                Id = _formModel.Id,
+                Date = _formModel.Date,
+                Model = _formModel.Model,
+                Usage = _formModel.Usage
+            });
+        }
+        else
+        {
+            UsageService.Add(new DailyUsage
+            {
+                Date = _formModel.Date,
+                Model = _formModel.Model,
+                Usage = _formModel.Usage
+            });
+        }
+
+        LoadEntries();
+        _showForm = false;
+    }
+
+    private void ConfirmDelete(DailyUsage entry) => _entryToDelete = entry;
+
+    private void DeleteEntry()
+    {
+        if (_entryToDelete is not null)
+        {
+            UsageService.Delete(_entryToDelete.Id);
+            _entryToDelete = null;
+            LoadEntries();
+        }
+    }
+
+    private class FormModel
+    {
+        public Guid Id { get; set; }
+        public DateOnly Date { get; set; } = DateOnly.FromDateTime(DateTime.Today);
+        public string Model { get; set; } = string.Empty;
+        public decimal Usage { get; set; }
+    }
+}

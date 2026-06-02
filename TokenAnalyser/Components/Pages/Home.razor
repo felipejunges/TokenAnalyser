@@ -1,0 +1,145 @@
+﻿@page "/"
+@rendermode InteractiveServer
+@inject DailyUsageService UsageService
+
+<PageTitle>Dashboard – Token Analyser</PageTitle>
+
+<h1 class="mb-3">📊 Dashboard</h1>
+
+<div class="d-flex align-items-center gap-3 mb-4">
+    <label class="fw-semibold mb-0">Month:</label>
+    <select class="form-select w-auto" @bind="SelectedMonth" @bind:after="Refresh">
+        @for (int m = 1; m <= 12; m++)
+        {
+            <option value="@m">@(new DateTime(SelectedYear, m, 1).ToString("MMMM"))</option>
+        }
+    </select>
+    <select class="form-select w-auto" @bind="SelectedYear" @bind:after="Refresh">
+        @for (int y = DateTime.Today.Year - 2; y <= DateTime.Today.Year + 1; y++)
+        {
+            <option value="@y">@y</option>
+        }
+    </select>
+</div>
+
+<div class="card shadow-sm">
+    <div class="card-body">
+        <h5 class="card-title">Burn-up: @(new DateTime(SelectedYear, SelectedMonth, 1).ToString("MMMM yyyy"))</h5>
+        <p class="text-muted small">Actual cumulative usage vs theoretical (1 500 tokens / month)</p>
+
+        <ApexChart TItem="ChartPoint"
+                   Options="_options"
+                   @ref="_chart">
+
+            <ApexPointSeries TItem="ChartPoint"
+                             Items="_actualSeries"
+                             Name="Actual Usage"
+                             SeriesType="SeriesType.Line"
+                             XValue="@(p => p.Day)"
+                             YValue="@(p => p.Value)"
+                             Color="#0d6efd" />
+
+            <ApexPointSeries TItem="ChartPoint"
+                             Items="_theoreticalSeries"
+                             Name="Theoretical (1 500)"
+                             SeriesType="SeriesType.Line"
+                             XValue="@(p => p.Day)"
+                             YValue="@(p => p.Value)"
+                             Color="#dc3545" />
+
+        </ApexChart>
+    </div>
+</div>
+
+<div class="row mt-4">
+    <div class="col-md-4">
+        <div class="card text-bg-primary shadow-sm">
+            <div class="card-body">
+                <h6 class="card-title">Total Used</h6>
+                <p class="fs-4 mb-0">@_totalUsed.ToString("N2")</p>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="card text-bg-success shadow-sm">
+            <div class="card-body">
+                <h6 class="card-title">Remaining</h6>
+                <p class="fs-4 mb-0">@Math.Max(0, 1500 - _totalUsed).ToString("N2")</p>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="card @(_totalUsed > 1500 ? "text-bg-danger" : "text-bg-secondary") shadow-sm">
+            <div class="card-body">
+                <h6 class="card-title">% Used</h6>
+                <p class="fs-4 mb-0">@((_totalUsed / 1500m * 100).ToString("N1"))%</p>
+            </div>
+        </div>
+    </div>
+</div>
+
+@code {
+    private int SelectedYear { get; set; } = DateTime.Today.Year;
+    private int SelectedMonth { get; set; } = DateTime.Today.Month;
+
+    private List<ChartPoint> _actualSeries = [];
+    private List<ChartPoint> _theoreticalSeries = [];
+    private decimal _totalUsed;
+    private ApexChart<ChartPoint>? _chart;
+
+    private ApexChartOptions<ChartPoint> _options = new()
+    {
+        Stroke = new Stroke { Curve = [Curve.Straight], Width = [3, 3] },
+        Xaxis = new XAxis { Title = new AxisTitle { Text = "Day" } },
+        Yaxis = [new YAxis { Title = new AxisTitle { Text = "Tokens" } }],
+        Legend = new Legend { Position = LegendPosition.Top },
+        Chart = new Chart { Toolbar = new Toolbar { Show = false }, Zoom = new Zoom { Enabled = false } }
+    };
+
+    protected override void OnInitialized() => BuildSeries();
+
+    private async Task Refresh()
+    {
+        BuildSeries();
+        if (_chart is not null)
+            await _chart.UpdateSeriesAsync();
+    }
+
+    private void BuildSeries()
+    {
+        var entries = UsageService.GetByMonth(SelectedYear, SelectedMonth);
+        var daysInMonth = DateTime.DaysInMonth(SelectedYear, SelectedMonth);
+        var dailyTheoretical = 1500m / daysInMonth;
+
+        _actualSeries = [];
+        _theoreticalSeries = [];
+
+        decimal cumulativeActual = 0;
+        decimal cumulativeTheoretical = 0;
+        var today = DateOnly.FromDateTime(DateTime.Today);
+
+        for (int d = 1; d <= daysInMonth; d++)
+        {
+            var pointDate = new DateOnly(SelectedYear, SelectedMonth, d);
+            var dayLabel = d.ToString();
+
+            // Sum all entries for this day across all models
+            var dayUsage = entries.Where(e => e.Date.Day == d).Sum(e => e.Usage);
+            if (dayUsage > 0)
+                cumulativeActual += dayUsage;
+
+            cumulativeTheoretical += dailyTheoretical;
+
+            // Always add a point for every day so both series share the same X axis.
+            // Use null for actual on future days so the line stops at today.
+            decimal? actualValue = pointDate <= today ? Math.Round(cumulativeActual, 2) : null;
+
+            _actualSeries.Add(new ChartPoint(dayLabel, actualValue));
+            _theoreticalSeries.Add(new ChartPoint(dayLabel, Math.Round(cumulativeTheoretical, 2)));
+        }
+
+        _totalUsed = entries.Sum(e => e.Usage);
+    }
+
+    private record ChartPoint(string Day, decimal? Value);
+}
