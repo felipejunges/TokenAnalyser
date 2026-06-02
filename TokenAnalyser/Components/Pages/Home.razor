@@ -52,7 +52,7 @@
 </div>
 
 <div class="row mt-4">
-    <div class="col-md-4">
+    <div class="col-md-3">
         <div class="card text-bg-primary shadow-sm">
             <div class="card-body">
                 <h6 class="card-title">Total Used</h6>
@@ -60,7 +60,7 @@
             </div>
         </div>
     </div>
-    <div class="col-md-4">
+    <div class="col-md-3">
         <div class="card text-bg-success shadow-sm">
             <div class="card-body">
                 <h6 class="card-title">Remaining</h6>
@@ -68,11 +68,20 @@
             </div>
         </div>
     </div>
-    <div class="col-md-4">
+    <div class="col-md-3">
         <div class="card @(_totalUsed > 1500 ? "text-bg-danger" : "text-bg-secondary") shadow-sm">
             <div class="card-body">
                 <h6 class="card-title">% Used</h6>
-                <p class="fs-4 mb-0">@((_totalUsed / 1500m * 100).ToString("N1"))%</p>
+                <p class="fs-4 mb-0">@(_percentageUsed.ToString("N1"))%</p>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-md-3">
+        <div class="card @(_totalUsed > 1500 ? "text-bg-danger" : "text-bg-secondary") shadow-sm">
+            <div class="card-body">
+                <h6 class="card-title">% theorical</h6>
+                <p class="fs-4 mb-0">@(_percentageTheorical.ToString("N1"))%</p>
             </div>
         </div>
     </div>
@@ -85,6 +94,8 @@
     private List<ChartPoint> _actualSeries = [];
     private List<ChartPoint> _theoreticalSeries = [];
     private decimal _totalUsed;
+    private decimal _percentageUsed;
+    private decimal _percentageTheorical;
     private ApexChart<ChartPoint>? _chart;
 
     private ApexChartOptions<ChartPoint> _options = new()
@@ -117,6 +128,7 @@
         decimal cumulativeActual = 0;
         decimal cumulativeTheoretical = 0;
         var today = DateOnly.FromDateTime(DateTime.Today);
+        var daysPassed = 0;
 
         for (int d = 1; d <= daysInMonth; d++)
         {
@@ -134,11 +146,16 @@
             // Use null for actual on future days so the line stops at today.
             decimal? actualValue = pointDate <= today ? Math.Round(cumulativeActual, 2) : null;
 
+            if (pointDate <= today)
+                daysPassed++;
+
             _actualSeries.Add(new ChartPoint(dayLabel, actualValue));
             _theoreticalSeries.Add(new ChartPoint(dayLabel, Math.Round(cumulativeTheoretical, 2)));
         }
 
         _totalUsed = entries.Sum(e => e.Usage);
+        _percentageUsed = _totalUsed / 1500m * 100;
+        _percentageTheorical = daysPassed == 0 ? 0M : daysPassed * 100M / daysInMonth;
     }
 
     private record ChartPoint(string Day, decimal? Value);
