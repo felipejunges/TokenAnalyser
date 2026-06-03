@@ -1,0 +1,75 @@
+@page "/Account/Login"
+@using System.ComponentModel.DataAnnotations
+@using Microsoft.AspNetCore.Authentication
+@using Microsoft.AspNetCore.Identity
+@inject SignInManager<IdentityUser> SignInManager
+@inject NavigationManager NavigationManager
+
+<PageTitle>Login – Token Analyser</PageTitle>
+
+<div class="d-flex justify-content-center align-items-center vh-100">
+    <div class="card shadow-sm" style="width: 380px;">
+        <div class="card-body p-4">
+            <h4 class="card-title mb-4 text-center">🔐 Token Analyser</h4>
+
+            <EditForm Model="Input!" method="post" OnValidSubmit="LoginUser" FormName="login">
+                <DataAnnotationsValidator />
+
+                <div class="mb-3">
+                    <label class="form-label">Email</label>
+                    <InputText @bind-Value="Input!.Email" class="form-control" autocomplete="username" placeholder="admin@tokenanalyser.com" />
+                    <ValidationMessage For="() => Input!.Email" class="text-danger small" />
+                </div>
+
+                <div class="mb-3">
+                    <label class="form-label">Password</label>
+                    <InputText type="password" @bind-Value="Input!.Password" class="form-control" autocomplete="current-password" />
+                    <ValidationMessage For="() => Input!.Password" class="text-danger small" />
+                </div>
+
+                @if (!string.IsNullOrEmpty(ErrorMessage))
+                {
+                    <div class="alert alert-danger py-2">@ErrorMessage</div>
+                }
+
+                <button type="submit" class="btn btn-primary w-100">Log in</button>
+            </EditForm>
+        </div>
+    </div>
+</div>
+
+@code {
+    [SupplyParameterFromForm]
+    private InputModel? Input { get; set; }
+
+    protected override void OnInitialized() => Input ??= new();
+
+    [SupplyParameterFromQuery]
+    private string? ReturnUrl { get; set; }
+
+    private string? ErrorMessage { get; set; }
+
+    public async Task LoginUser()
+    {
+        var result = await SignInManager.PasswordSignInAsync(Input!.Email, Input.Password, isPersistent: false, lockoutOnFailure: false);
+        if (result.Succeeded)
+        {
+            NavigationManager.NavigateTo(ReturnUrl ?? "/");
+        }
+        else
+        {
+            ErrorMessage = "Invalid email or password.";
+        }
+    }
+
+    private sealed class InputModel
+    {
+        [Required]
+        [EmailAddress]
+        public string Email { get; set; } = string.Empty;
+
+        [Required]
+        public string Password { get; set; } = string.Empty;
+    }
+}
+
