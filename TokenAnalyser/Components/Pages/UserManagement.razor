@@ -1,0 +1,274 @@
+@page "/admin/users"
+@rendermode InteractiveServer
+@attribute [Authorize(Roles = "Admin")]
+@using System.Security.Claims
+@inject UserManagementService UserSvc
+@inject AuthenticationStateProvider AuthState
+
+<PageTitle>User Management</PageTitle>
+
+<h1 class="mb-3">👥 User Management</h1>
+
+<button class="btn btn-primary mb-3" @onclick="OpenAddDialog">➕ Add User</button>
+
+@if (_users.Count == 0)
+{
+    <div class="alert alert-info">No users found.</div>
+}
+else
+{
+    <table class="table table-striped table-hover align-middle">
+        <thead class="table-dark">
+            <tr>
+                <th>Email</th>
+                <th>Roles</th>
+                <th class="text-center" style="width:230px">Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var (user, roles) in _users)
+            {
+                <tr>
+                    <td>@user.Email</td>
+                    <td>@(roles.Count == 0 ? "—" : string.Join(", ", roles))</td>
+                    <td class="text-center">
+                        <button class="btn btn-sm btn-outline-primary me-1"
+                                @onclick="() => OpenEditDialog(user, roles)">✏️ Edit</button>
+                        <button class="btn btn-sm btn-outline-warning me-1"
+                                @onclick="() => OpenPasswordDialog(user)">🔑 Password</button>
+                        <button class="btn btn-sm btn-outline-danger"
+                                disabled="@(user.Id == _currentUserId)"
+                                title="@(user.Id == _currentUserId ? "Cannot delete yourself" : "")"
+                                @onclick="() => ConfirmDelete(user)">🗑️ Delete</button>
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+}
+
+<!-- Add/Edit Modal -->
+@if (_showForm)
+{
+    <div class="modal d-block" tabindex="-1" style="background:rgba(0,0,0,.4)">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">@(_isEditing ? "Edit" : "Add") User</h5>
+                    <button type="button" class="btn-close" @onclick="CloseForm"></button>
+                </div>
+                <EditForm Model="_formModel" OnValidSubmit="SaveUser">
+                    <DataAnnotationsValidator />
+                    <div class="modal-body">
+                        <div class="mb-3">
+                            <label class="form-label">Email</label>
+                            <InputText class="form-control" @bind-Value="_formModel.Email" autocomplete="off" />
+                            <ValidationMessage For="() => _formModel.Email" />
+                        </div>
+                        @if (!_isEditing)
+                        {
+                            <div class="mb-3">
+                                <label class="form-label">Password</label>
+                                <InputText type="password" class="form-control" @bind-Value="_formModel.Password" autocomplete="new-password" />
+                                <ValidationMessage For="() => _formModel.Password" />
+                            </div>
+                        }
+                        <div class="mb-3 form-check">
+                            <InputCheckbox class="form-check-input" id="isAdminCheck" @bind-Value="_formModel.IsAdmin" />
+                            <label class="form-check-label" for="isAdminCheck">Admin</label>
+                        </div>
+                        @if (_formError is not null)
+                        {
+                            <div class="alert alert-danger py-1">@_formError</div>
+                        }
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" @onclick="CloseForm">Cancel</button>
+                        <button type="submit" class="btn btn-primary">Save</button>
+                    </div>
+                </EditForm>
+            </div>
+        </div>
+    </div>
+}
+
+<!-- Reset Password Modal -->
+@if (_showPasswordForm)
+{
+    <div class="modal d-block" tabindex="-1" style="background:rgba(0,0,0,.4)">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">🔑 Reset Password</h5>
+                    <button type="button" class="btn-close" @onclick="ClosePasswordForm"></button>
+                </div>
+                <EditForm Model="_passwordModel" OnValidSubmit="SavePassword">
+                    <DataAnnotationsValidator />
+                    <div class="modal-body">
+                        <div class="mb-3">
+                            <label class="form-label">New Password</label>
+                            <InputText type="password" class="form-control" @bind-Value="_passwordModel.NewPassword" autocomplete="new-password" />
+                            <ValidationMessage For="() => _passwordModel.NewPassword" />
+                        </div>
+                        @if (_formError is not null)
+                        {
+                            <div class="alert alert-danger py-1">@_formError</div>
+                        }
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" @onclick="ClosePasswordForm">Cancel</button>
+                        <button type="submit" class="btn btn-primary">Save</button>
+                    </div>
+                </EditForm>
+            </div>
+        </div>
+    </div>
+}
+
+<!-- Delete Confirm Modal -->
+@if (_userToDelete is not null)
+{
+    <div class="modal d-block" tabindex="-1" style="background:rgba(0,0,0,.4)">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title text-danger">Confirm Deletion</h5>
+                    <button type="button" class="btn-close" @onclick="() => _userToDelete = null"></button>
+                </div>
+                <div class="modal-body">
+                    Delete user <strong>@_userToDelete.Email</strong>? This cannot be undone.
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-secondary" @onclick="() => _userToDelete = null">Cancel</button>
+                    <button class="btn btn-danger" @onclick="DeleteUser">Delete</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private List<(IdentityUser User, IList<string> Roles)> _users = [];
+    private string? _currentUserId;
+
+    private bool _showForm;
+    private bool _isEditing;
+    private string? _editingUserId;
+    private UserFormModel _formModel = new();
+    private string? _formError;
+
+    private bool _showPasswordForm;
+    private string? _passwordUserId;
+    private PasswordModel _passwordModel = new();
+
+    private IdentityUser? _userToDelete;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var auth = await AuthState.GetAuthenticationStateAsync();
+        _currentUserId = auth.User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        await LoadUsers();
+    }
+
+    private async Task LoadUsers() =>
+        _users = await UserSvc.GetAllUsersWithRolesAsync();
+
+    private void OpenAddDialog()
+    {
+        _formModel = new();
+        _isEditing = false;
+        _formError = null;
+        _showForm = true;
+    }
+
+    private void OpenEditDialog(IdentityUser user, IList<string> roles)
+    {
+        _editingUserId = user.Id;
+        _formModel = new UserFormModel
+        {
+            Email = user.Email ?? string.Empty,
+            IsAdmin = roles.Contains("Admin")
+        };
+        _isEditing = true;
+        _formError = null;
+        _showForm = true;
+    }
+
+    private void CloseForm() => _showForm = false;
+
+    private async Task SaveUser()
+    {
+        _formError = null;
+
+        if (!_isEditing && string.IsNullOrWhiteSpace(_formModel.Password))
+        {
+            _formError = "Password is required.";
+            return;
+        }
+
+        IdentityResult result = _isEditing
+            ? await UserSvc.UpdateAsync(_editingUserId!, _formModel.Email, _formModel.IsAdmin)
+            : await UserSvc.CreateAsync(_formModel.Email, _formModel.Password!, _formModel.IsAdmin);
+
+        if (!result.Succeeded)
+        {
+            _formError = string.Join(" ", result.Errors.Select(e => e.Description));
+            return;
+        }
+
+        await LoadUsers();
+        _showForm = false;
+    }
+
+    private void OpenPasswordDialog(IdentityUser user)
+    {
+        _passwordUserId = user.Id;
+        _passwordModel = new();
+        _formError = null;
+        _showPasswordForm = true;
+    }
+
+    private void ClosePasswordForm() => _showPasswordForm = false;
+
+    private async Task SavePassword()
+    {
+        _formError = null;
+        var result = await UserSvc.ResetPasswordAsync(_passwordUserId!, _passwordModel.NewPassword);
+        if (!result.Succeeded)
+        {
+            _formError = string.Join(" ", result.Errors.Select(e => e.Description));
+            return;
+        }
+        _showPasswordForm = false;
+    }
+
+    private void ConfirmDelete(IdentityUser user) => _userToDelete = user;
+
+    private async Task DeleteUser()
+    {
+        if (_userToDelete is not null)
+        {
+            await UserSvc.DeleteAsync(_userToDelete.Id);
+            _userToDelete = null;
+            await LoadUsers();
+        }
+    }
+
+    private class UserFormModel
+    {
+        [Required, EmailAddress]
+        public string Email { get; set; } = string.Empty;
+
+        public string? Password { get; set; }
+
+        public bool IsAdmin { get; set; }
+    }
+
+    private class PasswordModel
+    {
+        [Required(ErrorMessage = "Password is required.")]
+        [MinLength(6, ErrorMessage = "Password must be at least 6 characters.")]
+        public string NewPassword { get; set; } = string.Empty;
+    }
+}
+

@@ -26,6 +26,7 @@ builder.Services.AddIdentityCore<IdentityUser>(options =>
     {
         options.SignIn.RequireConfirmedAccount = false;
     })
+    .AddRoles<IdentityRole>()
     .AddEntityFrameworkStores<AppDbContext>()
     .AddSignInManager()
     .AddDefaultTokenProviders();
@@ -34,6 +35,7 @@ builder.Services.AddAuthorization();
 builder.Services.AddCascadingAuthenticationState();
 
 builder.Services.AddScoped<DailyUsageService>();
+builder.Services.AddScoped<UserManagementService>();
 builder.Services.AddApexCharts();
 
 var app = builder.Build();
@@ -44,14 +46,23 @@ await using (var scope = app.Services.CreateAsyncScope())
     var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
     db.Database.Migrate();
 
+    var roleManager = scope.ServiceProvider.GetRequiredService<RoleManager<IdentityRole>>();
     var userManager = scope.ServiceProvider.GetRequiredService<UserManager<IdentityUser>>();
+
+    if (!await roleManager.RoleExistsAsync("Admin"))
+        await roleManager.CreateAsync(new IdentityRole("Admin"));
+
     const string adminEmail = "admin@tokenanalyser.com";
     const string adminPassword = "Admin@123!";
-    if (await userManager.FindByEmailAsync(adminEmail) == null)
+    var adminUser = await userManager.FindByEmailAsync(adminEmail);
+    if (adminUser == null)
     {
-        var user = new IdentityUser { UserName = adminEmail, Email = adminEmail };
-        await userManager.CreateAsync(user, adminPassword);
+        adminUser = new IdentityUser { UserName = adminEmail, Email = adminEmail };
+        await userManager.CreateAsync(adminUser, adminPassword);
     }
+
+    if (!await userManager.IsInRoleAsync(adminUser, "Admin"))
+        await userManager.AddToRoleAsync(adminUser, "Admin");
 }
 
 // Configure the HTTP request pipeline.
